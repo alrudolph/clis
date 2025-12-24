@@ -69,6 +69,12 @@ func main() {
 		log.Panicln(err)
 	}
 
+	for i := 0; i <= 9; i++ {
+		if err := g.SetKeybinding("", rune('0'+i), gocui.ModNone, runCommandShortcut(i)); err != nil {
+			log.Panicln(err)
+		}
+	}
+
 	if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
 		log.Panicln(err)
 	}
@@ -76,12 +82,9 @@ func main() {
 	g.Close()
 
 	cmd := exec.Command("npm", "run", command)
-
-	// Assign the command's stdout and stderr to the Go process's stdout and stderr
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	// Run the command and wait for it to complete
 	if err := cmd.Run(); err != nil {
 		log.Fatalf("%s failed with %s\n", command, err)
 	}
@@ -262,6 +265,26 @@ func runCommand(g *gocui.Gui, v *gocui.View) error {
 	command = cmd.Name
 
 	return quit(g, v)
+}
+
+func runCommandShortcut(shortcut int) func(g *gocui.Gui, v *gocui.View) error {
+	return func(g *gocui.Gui, v *gocui.View) error {
+		idx := 0
+
+		if shortcut < selected-offsetIdx {
+			idx = offsetIdx + shortcut
+		} else {
+			idx = offsetIdx + shortcut + 1
+		}
+
+		if idx == -1 || idx >= packageJson.nCommands() {
+			return nil
+		}
+
+		command = packageJson.commands[idx].Name
+
+		return quit(g, v)
+	}
 }
 
 func closeOutput(g *gocui.Gui, v *gocui.View) error {
