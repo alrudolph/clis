@@ -1,0 +1,46 @@
+name: Go CI
+
+on:
+  pull_request:
+    paths:
+      - ./src/npm-cli/**
+    branches:
+      - main
+
+defaults:
+  run:
+    shell: bash
+    working-directory: ./src/npm-cli
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: gofmt -l .
+
+      - name: fmting
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: fmting
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: go test
+        run: go test ./...

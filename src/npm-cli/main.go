@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -19,11 +20,12 @@ var (
 	command     string
 )
 
-const paddingTop = 1
-const paddingBottom = 1
+const paddingTop = 2
+const paddingBottom = 2
 
 func main() {
 	g, err := gocui.NewGui(gocui.OutputNormal)
+
 	if err != nil {
 		log.Panicln(err)
 	}
@@ -38,48 +40,44 @@ func main() {
 
 	g.SetManagerFunc(layout)
 
-	if err := g.SetKeybinding("", gocui.KeyArrowDown, gocui.ModNone, cursorDown); err != nil {
+	for _, key := range []gocui.Key{gocui.KeyArrowDown, 's', 'j'} {
+		if err = g.SetKeybinding("", key, gocui.ModNone, cursorDown); err != nil {
+			log.Panicln(err)
+		}
+	}
+
+	for _, key := range []gocui.Key{gocui.KeyArrowUp, 'w', 'k'} {
+		if err = g.SetKeybinding("", key, gocui.ModNone, cursorUp); err != nil {
+			log.Panicln(err)
+		}
+	}
+
+	if err = g.SetKeybinding("", gocui.KeyEnter, gocui.ModNone, runCommand); err != nil {
 		log.Panicln(err)
 	}
-	if err := g.SetKeybinding("", 's', gocui.ModNone, cursorDown); err != nil {
-		log.Panicln(err)
-	}
-	if err := g.SetKeybinding("", 'j', gocui.ModNone, cursorDown); err != nil {
+	if err = g.SetKeybinding("", gocui.KeyEsc, gocui.ModNone, closeOutput); err != nil {
 		log.Panicln(err)
 	}
 
-	if err := g.SetKeybinding("", gocui.KeyArrowUp, gocui.ModNone, cursorUp); err != nil {
-		log.Panicln(err)
-	}
-	if err := g.SetKeybinding("", 'w', gocui.ModNone, cursorUp); err != nil {
-		log.Panicln(err)
-	}
-	if err := g.SetKeybinding("", 'k', gocui.ModNone, cursorUp); err != nil {
+	if err = g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
 		log.Panicln(err)
 	}
 
-	if err := g.SetKeybinding("", gocui.KeyEnter, gocui.ModNone, runCommand); err != nil {
-		log.Panicln(err)
-	}
-	if err := g.SetKeybinding("", gocui.KeyEsc, gocui.ModNone, closeOutput); err != nil {
-		log.Panicln(err)
-	}
-
-	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
-		log.Panicln(err)
-	}
-
-	for i := 0; i <= 9; i++ {
+	for i := range 10 {
 		if err := g.SetKeybinding("", rune('0'+i), gocui.ModNone, runCommandShortcut(i)); err != nil {
 			log.Panicln(err)
 		}
 	}
 
-	if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
+	if err := g.MainLoop(); err != nil && !errors.Is(err, gocui.ErrQuit) {
 		log.Panicln(err)
 	}
 
 	g.Close()
+
+	if command == "" {
+		return
+	}
 
 	cmd := exec.Command("npm", "run", command)
 	cmd.Stdout = os.Stdout
@@ -94,29 +92,38 @@ func layout(g *gocui.Gui) error {
 	maxX, maxY := g.Size()
 
 	v, err := g.SetView("commands", -1, -1, maxX, maxY)
-	v.Frame = false
-	v.SetOrigin(0, 0)
 
 	if err != nil {
-		if err != gocui.ErrUnknownView {
+		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
 	}
 
+	v.Frame = false
+	err = v.SetOrigin(0, 0)
+
+	if err != nil {
+		return err
+	}
+
 	v.Clear()
-	_ = refreshCommandsView(g)
+
+	if err = refreshCommandsView(g); err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func quit(g *gocui.Gui, v *gocui.View) error {
+func quit(_ *gocui.Gui, _ *gocui.View) error {
 	return gocui.ErrQuit
 }
 
 func refreshCommandsView(g *gocui.Gui) error {
 	v, err := g.View("commands")
+
 	if err != nil {
-		return nil
+		return err
 	}
 
 	v.Clear()
@@ -124,7 +131,7 @@ func refreshCommandsView(g *gocui.Gui) error {
 	maxX, _ := g.Size()
 	position := 0
 
-	header := ""
+	var header string
 
 	if offsetIdx == 0 {
 		header = fmt.Sprintf(" (%d commands)", packageJson.nCommands())
@@ -134,8 +141,27 @@ func refreshCommandsView(g *gocui.Gui) error {
 
 	title := head("["+packageJson.title+"]", maxX-len(header)-1)
 	t := color.New(color.Bold)
-	t.Fprint(v, title)
-	fmt.Fprintf(v, "%s%s\n", strings.Repeat(" ", maxX-len(title)-len(header)), header)
+	_, err = t.Fprint(v, title)
+
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintf(v, "%s%s\n", strings.Repeat(" ", maxX-len(title)-len(header)), header)
+
+	if err != nil {
+		return err
+	}
+
+	for i := 1; i < paddingTop; i++ {
+		_, err = fmt.Fprintln(v, "")
+
+		if err != nil {
+			return err
+		}
+	}
+
+	nShortcutLines := 10
 
 	for j := range min(getHeight(g), packageJson.nCommands()) {
 		i := j + offsetIdx
@@ -145,6 +171,7 @@ func refreshCommandsView(g *gocui.Gui) error {
 		}
 
 		cmd := packageJson.commands[i]
+
 		var line bytes.Buffer
 
 		selectedCommand := " [Enter]"
@@ -153,50 +180,98 @@ func refreshCommandsView(g *gocui.Gui) error {
 
 		if i == selected {
 			a := color.New(color.FgYellow, color.Bold)
-			a.Fprint(&line, cursor)
+			_, err = a.Fprint(&line, cursor)
+
+			if err != nil {
+				return err
+			}
 
 			remainingColumns := maxX - len(selectedCommand) - len(cursor)
 
 			c := color.New(color.FgCyan, color.Bold, color.Underline)
-			c.Fprint(&line, head(cmd.Name, remainingColumns))
+			_, err = c.Fprint(&line, head(cmd.Name, remainingColumns))
 			remainingColumns -= len(head(cmd.Name, remainingColumns))
 
+			if err != nil {
+				return err
+			}
+
 			d := color.New(color.FgWhite)
-			cmd := fmt.Sprintf(": %s", cmd.Command)
-			d.Fprint(&line, head(cmd, remainingColumns))
+			cmd := ": " + cmd.Command
+			_, err = d.Fprint(&line, head(cmd, remainingColumns))
 			remainingColumns -= len(head(cmd, remainingColumns))
 
-			d.Fprint(&line, strings.Repeat(" ", max(0, remainingColumns)))
+			if err != nil {
+				return err
+			}
+
+			_, err = d.Fprint(&line, strings.Repeat(" ", max(0, remainingColumns)))
+
+			if err != nil {
+				return err
+			}
 
 			e := color.New(color.FgGreen, color.Bold)
-			e.Fprint(&line, selectedCommand)
+			_, err = e.Fprint(&line, selectedCommand)
+
+			if err != nil {
+				return err
+			}
 		} else {
 			remainingColumns := maxX - len(emptyCursor)
 
-			if position < 10 {
+			if position < nShortcutLines {
 				remainingColumns -= 4
 			}
 
 			c := color.New(color.FgCyan, color.Bold)
-			c.Fprintf(&line, "%s%s", emptyCursor, head(cmd.Name, remainingColumns))
+			_, err = c.Fprintf(&line, "%s%s", emptyCursor, head(cmd.Name, remainingColumns))
 			remainingColumns -= len(head(cmd.Name, remainingColumns))
 
+			if err != nil {
+				return err
+			}
+
 			d := color.New(color.FgBlack)
-			cmd := fmt.Sprintf(": %s", cmd.Command)
-			d.Fprint(&line, head(cmd, remainingColumns))
+			cmd := ": " + cmd.Command
+			_, err = d.Fprint(&line, head(cmd, remainingColumns))
 			remainingColumns -= len(head(cmd, remainingColumns))
 
-			d.Fprint(&line, strings.Repeat(" ", max(0, remainingColumns)))
+			if err != nil {
+				return err
+			}
 
-			if position < 10 {
+			_, err = d.Fprint(&line, strings.Repeat(" ", max(0, remainingColumns)))
+
+			if err != nil {
+				return err
+			}
+
+			if position < nShortcutLines {
 				e := color.New(color.FgBlack)
-				e.Fprintf(&line, " (%d)", position)
+				_, err = e.Fprintf(&line, " (%d)", position)
+
+				if err != nil {
+					return err
+				}
 			}
 
 			position++
 		}
 
-		fmt.Fprintln(v, line.String())
+		_, err = fmt.Fprintln(v, line.String())
+
+		if err != nil {
+			return err
+		}
+	}
+
+	for i := 1; i < paddingBottom; i++ {
+		_, err = fmt.Fprintln(v, "")
+
+		if err != nil {
+			return err
+		}
 	}
 
 	footer := ""
@@ -207,9 +282,17 @@ func refreshCommandsView(g *gocui.Gui) error {
 
 	c := color.New(color.FgBlack)
 	commands := head("CTRL+C to quit", maxX-len(footer))
-	c.Fprint(v, commands)
+	_, err = c.Fprint(v, commands)
 
-	fmt.Fprintf(v, "%s%s", strings.Repeat(" ", maxX-len(footer)-len(commands)), footer)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintf(v, "%s%s", strings.Repeat(" ", maxX-len(footer)-len(commands)), footer)
+
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -218,10 +301,11 @@ func head(value string, n int) string {
 	if len(value) <= n {
 		return value
 	}
+
 	return value[:n]
 }
 
-func cursorDown(g *gocui.Gui, v *gocui.View) error {
+func cursorDown(g *gocui.Gui, _ *gocui.View) error {
 	if packageJson.nCommands() == 0 {
 		return nil
 	}
@@ -239,10 +323,11 @@ func cursorDown(g *gocui.Gui, v *gocui.View) error {
 
 func getHeight(g *gocui.Gui) int {
 	_, maxY := g.Size()
+
 	return maxY - paddingTop - paddingBottom
 }
 
-func cursorUp(g *gocui.Gui, v *gocui.View) error {
+func cursorUp(g *gocui.Gui, _ *gocui.View) error {
 	if packageJson.nCommands() == 0 {
 		return nil
 	}
@@ -269,7 +354,7 @@ func runCommand(g *gocui.Gui, v *gocui.View) error {
 
 func runCommandShortcut(shortcut int) func(g *gocui.Gui, v *gocui.View) error {
 	return func(g *gocui.Gui, v *gocui.View) error {
-		idx := 0
+		var idx int
 
 		if shortcut < selected-offsetIdx {
 			idx = offsetIdx + shortcut
@@ -287,7 +372,6 @@ func runCommandShortcut(shortcut int) func(g *gocui.Gui, v *gocui.View) error {
 	}
 }
 
-func closeOutput(g *gocui.Gui, v *gocui.View) error {
-	_ = g.DeleteView("output")
-	return nil
+func closeOutput(g *gocui.Gui, _ *gocui.View) error {
+	return g.DeleteView("output")
 }

@@ -1,0 +1,45 @@
+name: Sync Static Site to S3
+description: Sync the directory containing a static website to an S3 bucket with html file considerations.
+author: Alex Rudolph
+runs:
+  using: composite
+  steps:
+  - name: Download sync-static-site-s3 CLI
+    run: |
+      gh release download sync-static-site-s3--v1 \
+        --repo alrudolph/sync-static-site-s3 \
+        --pattern "sync-static-site-s3-linux-amd64" \
+        -D $HOME \
+        --skip-existing
+    env:
+      GH_TOKEN: ${{ github.token }}
+    shell: bash
+  - name: Make cli executable
+    run: chmod +x $HOME/sync-static-site-s3-linux-amd64
+    shell: bash
+  - name: Sync Static Site to S3
+    run:  |
+      $HOME/sync-static-site-s3-linux-amd64 \
+        --directory "${{inputs.directory}}" \
+        --bucket "${{inputs.bucket}}" \
+        --cf-invalidate="${{inputs.invalidate-cloudfront}}" \
+        --prefix "${{inputs.prefix}}"
+    shell: bash
+inputs:
+  bucket:
+    description: Bucket name
+    required: true
+  directory:
+    description: Path to directory
+    required: true
+  invalidate-cloudfront:
+    description: Invalidate CloudFront distribution
+    required: false
+    default: false
+  prefix:
+    description: Prefix for the files
+    required: false
+    default: ''
+branding:
+  icon: upload-cloud
+  color: blue

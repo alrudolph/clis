@@ -1,0 +1,51 @@
+name: Automated file updates
+
+on:
+  pull_request:
+    paths:
+      - ./src/genall/**
+    branches:
+      - main
+
+defaults:
+  run:
+    shell: bash
+    working-directory: ./src/genall
+
+jobs:
+  commit_changes:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Set up Python"
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: "./src/genall/.python-version"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Format Python
+        run: |
+          uv run isort genall
+          uv run black genall
+
+      - name: fmting
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: add genall, isort, black fixes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Type check with mypy
+        run: uv run mypy genall
+
+      - name: Run tests
+        run: uv run pytest .
