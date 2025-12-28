@@ -1,0 +1,15 @@
+name: "Python Generate Init Alls Action"
+description: "Generates __init__.py files for Python packages using GenAll"
+author: "alrudolph"
+
+inputs:
+  path:
+    description: "Path to the Python package for which to generate __init__.py files"
+    required: true
+    default: "."
+
+runs:
+  using: "docker"
+  image: "Dockerfile"
+  args:
+    - ${{ inputs.path }}
